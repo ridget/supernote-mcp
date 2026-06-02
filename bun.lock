@@ -4,15 +4,13 @@
   "workspaces": {
     "": {
       "name": "supernote-mcp",
-      "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.29.0",
-        "supernote-typescript": "^0.3.0",
-        "zod": "^4.0.0",
-      },
       "devDependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
         "@types/bun": "^1.1.0",
         "@types/node": "^20.0.0",
+        "supernote-typescript": "^0.3.0",
         "typescript": "^5.5.0",
+        "zod": "^4.0.0",
       },
     },
   },
