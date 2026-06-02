@@ -1,6 +1,7 @@
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 
 const MIRROR_PATH = "/screencast.mjpeg";
+const BROWSE_PATH = "/";
 const DEFAULT_PROBE_TIMEOUT_MS = 400;
 const DEFAULT_CONCURRENCY = 32;
 /** Never probe more than a /24 worth of hosts per interface. */
@@ -100,6 +101,24 @@ export function isMirrorHost(
     const contentType = res.headers.get("content-type") ?? "";
     controller.abort(); // we only needed the headers; don't drain the stream
     return res.ok && contentType.includes("multipart");
+  });
+}
+
+/**
+ * Probe one host: is it serving the Supernote Browse & Access file server on `port`?
+ * The listing page embeds the file JSON (`fileList` / `deviceName`), which we use as the
+ * fingerprint to avoid matching arbitrary web servers that happen to answer on this port.
+ */
+export function isBrowseHost(
+  host: string,
+  port: number,
+  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return probeHost(`http://${host}:${port}${BROWSE_PATH}`, timeoutMs, signal, async (res) => {
+    if (!res.ok) return false;
+    const body = await res.text();
+    return body.includes("fileList") || body.includes("deviceName");
   });
 }
 

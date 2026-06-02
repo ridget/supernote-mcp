@@ -6,12 +6,19 @@ An [MCP](https://modelcontextprotocol.io) server that captures the **live screen
 Sketch or handwrite on your Supernote during a planning/whiteboarding session, then ask your agent
 "what did I just draw?" — it pulls the current canvas in as vision input and reasons over it inline.
 
-The server exposes a single tool, **`supernote_snapshot`**, which grabs one frame on demand. It is
-**lazy**: it touches the device only when the tool is invoked, so a session that never asks for the
-canvas makes no network calls to the tablet.
+Beyond the live screen, it can also browse the device's saved files over its **Browse & Access**
+Wi-Fi server. Every tool is **lazy** — it touches the device only when invoked, so a session that
+never calls one makes no network calls to the tablet.
 
-Built on [`supernote-typescript`](https://github.com/philips/supernote-typescript)'s
-`fetchMirrorFrame` for the capture.
+> [!IMPORTANT]
+> **Unofficial, community-built project — not affiliated with, authorised by, or endorsed by
+> Ratta / Supernote.** "Supernote" and "Ratta" are trademarks of their respective owner, used here
+> only for identification. It relies on **reverse-engineered, undocumented LAN interfaces** (screen
+> mirror + Browse & Access) that may change or break with firmware updates. Provided **as-is** under
+> the MIT license — use at your own risk.
+
+Built on [`supernote-typescript`](https://github.com/philips/supernote-typescript) for screen
+capture and `.note` parsing.
 
 ## Prerequisites
 
@@ -30,6 +37,20 @@ Built on [`supernote-typescript`](https://github.com/philips/supernote-typescrip
 
 Set the IP once via the `SUPERNOTE_IP` environment variable, or pass it per-call as the tool's
 `ip` argument (an explicit argument wins over the env var).
+
+### Browse & Access (for the file tools)
+
+`supernote_list_files` (and the note tools) use a **separate** device feature from screen mirroring:
+**Browse & Access**, the built-in Wi-Fi file server on **port 8089**.
+
+1. On the Supernote, **swipe down from the top** of the screen to open the drop-down toolbar and tap
+   **Browse & Access**.
+2. A popup shows an address like `http://192.168.1.42:8089` and stays open while it's active. The
+   device IP is the same as for mirroring; the tools target port 8089 automatically.
+3. Keep the popup open while you want the agent to read or upload files.
+
+Browse & Access and Screen Mirroring are independent toggles — enable whichever the task needs (or
+both). Discovery probes each port, so the device can be found with only one of them on.
 
 ### Coping with a changing IP
 
@@ -66,17 +87,18 @@ Restart Claude Code, then try: *"Snapshot my Supernote and tell me what I drew."
 > On macOS the downloaded binary is unsigned; the first run may be blocked by Gatekeeper.
 > Right-click → Open once, or run `xattr -d com.apple.quarantine /path/to/supernote-mcp-darwin-arm64`.
 
-## The tool
+## The tools
 
-| | |
-|---|---|
-| **Name** | `supernote_snapshot` |
-| **Input** | `ip` *(optional string)* — device IP, optionally `:port`. Defaults to `SUPERNOTE_IP`. |
-| **Returns** | MCP image content (`image/png`) of the current canvas, or an actionable error. |
+All tools accept an optional `ip` (device IP, optionally `:port`; defaults to `SUPERNOTE_IP`, else a
+LAN scan) and return a clear, actionable message on failure rather than hanging.
 
-If capture fails it returns a clear message pointing at the usual causes — wrong IP, mirroring
-turned off, or the host/device not sharing a VPN-free Wi-Fi network — and times out fast (10s)
-rather than hanging on a stalled stream.
+| Tool | Needs | Input | Returns |
+|------|-------|-------|---------|
+| `supernote_snapshot` | Screen Mirroring (8080) | `ip?` | the live screen as `image/png` |
+| `supernote_list_files` | Browse & Access (8089) | `ip?`, `path?` | a listing — name, folder?, size, date, and a `path` to pass on |
+
+Failures point at the usual causes — wrong IP, the relevant feature turned off, or the host/device
+not sharing a VPN-free Wi-Fi network — and time out fast (10s) rather than hanging.
 
 ## Local development
 
@@ -89,6 +111,10 @@ bun install
 
 # Capture-first verification against a real device (writes a PNG you can open):
 bun run src/capture.ts --ip 192.168.1.42 --out frame.png
+
+# Browse & Access (port 8089) — list a directory, download a file:
+bun run src/browse.ts list --ip 192.168.1.42 --path /Note
+bun run src/browse.ts get  --ip 192.168.1.42 --path /Note/obsidian/x.note --out x.note
 
 # Run the MCP server over stdio:
 bun run src/server.ts
@@ -110,10 +136,12 @@ bun run build:binary   # self-contained executable -> dist/supernote-mcp
 `src/capture.ts` wraps `fetchMirrorFrame(`${ip}:8080`)`, which parses the device's
 `multipart/x-mixed-replace` stream, extracts a frame, and decodes it via
 [`image-js`](https://github.com/image-js/image-js). The frame is re-encoded to PNG (sidestepping
-PNG-vs-JPEG part-encoding differences across firmwares) and returned as base64. `src/discover.ts`
-provides the LAN-scan fallback used when the configured address is unreachable. `src/server.ts`
-registers `supernote_snapshot` on an `McpServer` over the stdio transport and returns that PNG as
-MCP image content.
+PNG-vs-JPEG part-encoding differences across firmwares) and returned as base64. `src/browse.ts`
+is a client for the Browse & Access HTTP file server (port 8089): it lists directories (parsing the
+listing page's embedded JSON) and downloads files. `src/resolve.ts` holds the shared address
+resolution + LAN-scan fallback used by both, and `src/discover.ts` does the subnet scan (probing the
+mirror or Browse & Access endpoint to recognise the device). `src/server.ts` registers the tools on
+an `McpServer` over the stdio transport.
 
 ## License
 

@@ -4,6 +4,7 @@ import {
   discoverSupernote,
   enumerateCandidates,
   hostsForInterface,
+  isBrowseHost,
   isMirrorHost,
 } from "../src/discover.js";
 
@@ -183,5 +184,52 @@ describe("isMirrorHost", () => {
     const probe = isMirrorHost("10.0.0.1", 8080, 5_000, controller.signal);
     controller.abort();
     expect(await probe).toBe(false);
+  });
+});
+
+describe("discoverSupernote probe option", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    mock.restore();
+  });
+
+  it("uses the supplied probe instead of the default mirror probe", async () => {
+    const probedPorts: number[] = [];
+    const found = await discoverSupernote({
+      candidates: ["192.0.2.5", "192.0.2.6"],
+      port: 8089,
+      concurrency: 4,
+      probe: async (host, port) => {
+        probedPorts.push(port);
+        return host === "192.0.2.6";
+      },
+    });
+    expect(found).toBe("192.0.2.6");
+    expect(probedPorts.every((p) => p === 8089)).toBe(true);
+  });
+});
+
+describe("isBrowseHost", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    mock.restore();
+  });
+
+  it("matches a host whose response body looks like a Browse & Access listing", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response("<html><script>const json = '{\"fileList\":[]}'</script></html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        }),
+    ) as unknown as typeof fetch;
+    expect(await isBrowseHost("192.0.2.7", 8089)).toBe(true);
+  });
+
+  it("ignores an unrelated web server on the same port", async () => {
+    globalThis.fetch = mock(
+      async () => new Response("<html>router admin</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    expect(await isBrowseHost("192.0.2.7", 8089)).toBe(false);
   });
 });
