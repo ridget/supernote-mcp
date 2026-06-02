@@ -1,0 +1,41 @@
+{
+  "name": "supernote-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that captures the live screen-mirror of a Ratta Supernote e-ink tablet and returns it as image input for AI agents.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "supernote-mcp": "dist/server.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "bun build src/server.ts --target node --outfile dist/server.js && chmod +x dist/server.js",
+    "build:binary": "bun build --compile src/server.ts --outfile dist/supernote-mcp",
+    "capture": "bun run src/capture.ts",
+    "dev": "bun run src/server.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "supernote",
+    "e-ink",
+    "screen-mirror"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "supernote-typescript": "^0.3.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^20.0.0",
+    "@types/bun": "^1.1.0"
+  }
+}

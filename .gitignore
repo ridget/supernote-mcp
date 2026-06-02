@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# devbox is an optional local dev convenience, not a project requirement.
+# Keep it out of the distributed repo so consumers never need devbox.
+.devbox/
+devbox.json
+devbox.lock
+
+# Captured frames from local verification
+*.png
+*.jpg
+*.jpeg
+
+# Logs
+*.log
