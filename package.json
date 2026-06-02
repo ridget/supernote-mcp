@@ -1,6 +1,7 @@
 {
   "name": "supernote-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "mcpName": "io.github.ridget/supernote-mcp",
   "description": "MCP server that captures the live screen-mirror of a Ratta Supernote e-ink tablet and returns it as image input for AI agents.",
   "license": "MIT",
   "author": "Tom Ridge <tomridge2@gmail.com>",

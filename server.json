@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ridget/supernote-mcp",
+  "title": "Supernote",
+  "description": "Pulls a Ratta Supernote e-ink tablet's live screen-mirror in as image input for AI agents.",
+  "repository": {
+    "url": "https://github.com/ridget/supernote-mcp",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "supernote-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SUPERNOTE_IP",
+          "description": "Device IP (optionally with :port) from the Supernote mirroring popup. Optional — if unset, the server scans the LAN for the mirror.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SUPERNOTE_DISCOVER",
+          "description": "Set to 0 to disable the LAN-scan fallback used when SUPERNOTE_IP is unset or unreachable.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
