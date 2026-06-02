@@ -70,6 +70,18 @@ describe("listFiles", () => {
       /Could not find the file listing/,
     );
   });
+
+  it("un-escapes apostrophes in filenames before parsing the embedded JSON", async () => {
+    globalThis.fetch = mock(async () =>
+      // The device serialises an apostrophe as \' inside the single-quoted JS string.
+      htmlResponse(
+        `<script>const json = '{"fileList":[{"name":"Tom\\'s notes.note","isDirectory":false,"uri":"Tom%27s.note","extension":"note","size":1,"date":"2026-01-01 09:00"}]}';</script>`,
+      ),
+    ) as unknown as typeof fetch;
+
+    const entries = await listFiles("192.0.2.10", "/", NO_DISCOVER);
+    expect(entries[0]?.name).toBe("Tom's notes.note");
+  });
 });
 
 describe("downloadFile", () => {
@@ -88,6 +100,43 @@ describe("downloadFile", () => {
     globalThis.fetch = mock(async () => htmlResponse("<html>directory listing</html>")) as unknown as typeof fetch;
     await expect(downloadFile("192.0.2.10", "stale/path", NO_DISCOVER)).rejects.toThrow(
       /returned an HTML page/,
+    );
+  });
+
+  it("rejects a body that exceeds the size cap via its Content-Length", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "application/octet-stream", "content-length": String(200 * 1024 * 1024) },
+        }),
+    ) as unknown as typeof fetch;
+
+    await expect(downloadFile("192.0.2.10", "huge.note", NO_DISCOVER)).rejects.toThrow(
+      /exceeds the .* download limit/,
+    );
+  });
+
+  it("does NOT fall back to a LAN scan when the device answers with an operational error", async () => {
+    // Discovery is left enabled (no NO_DISCOVER): an operational error must surface as-is,
+    // not trigger a scan — which here would mean a second fetch.
+    let calls = 0;
+    globalThis.fetch = mock(async () => {
+      calls++;
+      return htmlResponse("<html>directory listing</html>");
+    }) as unknown as typeof fetch;
+
+    await expect(downloadFile("192.0.2.10", "stale/path")).rejects.toThrow(/returned an HTML page/);
+    expect(calls).toBe(1);
+  });
+
+  it("wraps a genuine connection failure as an unreachable-device error", async () => {
+    globalThis.fetch = mock(async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    await expect(downloadFile("192.0.2.10", "Note/x.note", NO_DISCOVER)).rejects.toThrow(
+      /Could not reach the Supernote's Browse & Access server/,
     );
   });
 });
@@ -114,5 +163,25 @@ describe("uploadFile", () => {
     await expect(
       uploadFile("192.0.2.10", "/", "x.txt", Buffer.from("y"), NO_DISCOVER),
     ).rejects.toThrow(/HTTP 500/);
+  });
+
+  it("does not replay the upload against a rediscovered device after a timeout", async () => {
+    // Discovery enabled; the POST times out (ambiguous — the device may have stored it),
+    // so a non-idempotent write must NOT be retried elsewhere: only one request is made.
+    let calls = 0;
+    globalThis.fetch = mock(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          calls++;
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      uploadFile("192.0.2.10", "/", "x.txt", Buffer.from("y"), { timeoutMs: 10 }),
+    ).rejects.toThrow(/Could not reach the Supernote's Browse & Access server/);
+    expect(calls).toBe(1);
   });
 });

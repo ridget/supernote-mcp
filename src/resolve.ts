@@ -46,16 +46,43 @@ export interface ResolveOptions {
   probe: Probe;
   /** Allow a LAN scan when the configured address is unreachable/absent. Defaults to SUPERNOTE_DISCOVER. */
   discover?: boolean;
+  /**
+   * Whether `op` is safe to re-run against a rediscovered device. Reads are (default
+   * true); a write (upload) is not, because a *timeout* is ambiguous — the device may
+   * have applied it — so we never retry a non-idempotent op after a timeout.
+   */
+  idempotent?: boolean;
   messages: ResolveMessages;
   /** Called with the discovered IP when a scan succeeds (e.g. to log "set SUPERNOTE_IP=…"). */
   onDiscovered?: (host: string) => void;
 }
 
 /**
+ * Classify why an attempt against the configured address failed, so we only fall back
+ * to a LAN scan for *reachability* problems (a stale/wrong IP) — never for a device
+ * that answered and rejected the operation (HTTP 404, wrong path, parse failure):
+ * rediscovering on those just wastes a scan and masks the real, actionable error.
+ *
+ * - `connect`: nothing answered (connection refused/reset/DNS) — undici/Bun raise a
+ *   `TypeError`. The op definitely did not run, so retrying elsewhere is always safe.
+ * - `timeout`: the host stopped responding (abort/`AbortError` or our own race timeout).
+ *   Safe to retry for reads, but ambiguous for writes.
+ * - `operational`: the device responded and we rejected it. Surface it as-is.
+ */
+function classifyFailure(err: unknown): "connect" | "timeout" | "operational" {
+  const name = (err as { name?: string } | null)?.name;
+  if (name === "AbortError" || name === "TimeoutError") return "timeout";
+  if (err instanceof Error && /^Timed out after/.test(err.message)) return "timeout";
+  if (err instanceof TypeError) return "connect";
+  return "operational";
+}
+
+/**
  * Run `op` against the Supernote, resolving its address lazily: try the configured
- * address (arg → SUPERNOTE_IP) first; if that fails — or none is set — fall back to a
- * LAN scan (unless discovery is disabled), then run `op` against the discovered host.
- * `op` receives a `host:port` string. No device I/O happens until `op` is called.
+ * address (arg → SUPERNOTE_IP) first; if it is *unreachable* — or none is set — fall
+ * back to a LAN scan (unless discovery is disabled), then run `op` against the
+ * discovered host. Operation-level failures from a device that did answer propagate
+ * unchanged. `op` receives a `host:port` string; no device I/O happens until it runs.
  */
 export async function withDeviceAddress<T>(
   ipArg: string | undefined,
@@ -64,19 +91,24 @@ export async function withDeviceAddress<T>(
 ): Promise<T> {
   const { port, messages } = opts;
   const canDiscover = discoveryEnabled(opts.discover);
+  const idempotent = opts.idempotent ?? true;
   const configured = configuredAddress(ipArg);
 
   if (configured) {
     try {
       return await op(withPort(configured, port));
     } catch (err) {
-      if (!canDiscover) {
+      const kind = classifyFailure(err);
+      // The device answered and refused the op — its own error is the useful one.
+      if (kind === "operational") throw err;
+      const retriable = kind === "connect" || (kind === "timeout" && idempotent);
+      if (!canDiscover || !retriable) {
         throw new Error(
           messages.unreachableConfigured(withPort(configured, port), (err as Error).message),
           { cause: err },
         );
       }
-      // fall through to discovery
+      // Reachability failure with discovery enabled — fall through to a scan.
     }
   } else if (!canDiscover) {
     throw new Error(messages.noConfigDiscoverOff());

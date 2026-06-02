@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { SupernoteX } from "supernote-typescript";
-import { extractText, selectPages } from "../src/note.js";
+import { extractText, parseNote, renderPages, selectPages } from "../src/note.js";
 
 // extractText only reads `.pages`, so a plain object stands in for a parsed note —
 // no need to mock the shared supernote-typescript module (which would clobber the
@@ -57,6 +57,28 @@ describe("extractText", () => {
   });
 });
 
+describe("parseNote", () => {
+  it("throws a clear, actionable error when the bytes aren't a Supernote note", () => {
+    expect(() => parseNote(Buffer.from("this is not a .note file"))).toThrow(
+      /isn't a readable Supernote note/,
+    );
+  });
+});
+
+describe("renderPages", () => {
+  it("maps each rendered image to its 1-indexed page and strips the data-url prefix", async () => {
+    const render = async (_note: SupernoteX, pages: number[]) =>
+      pages.map(() => ({ toBase64: async () => "data:image/png;base64,UE5H" }));
+
+    const rendered = await renderPages({} as SupernoteX, [3, 5], render);
+
+    expect(rendered).toEqual([
+      { page: 3, base64: "UE5H", mimeType: "image/png" },
+      { page: 5, base64: "UE5H", mimeType: "image/png" },
+    ]);
+  });
+});
+
 describe("selectPages", () => {
   it("defaults to all pages when none are requested", () => {
     expect(selectPages(3, undefined)).toEqual({ pages: [1, 2, 3], truncated: false });
@@ -68,5 +90,9 @@ describe("selectPages", () => {
 
   it("caps at the max and flags truncation", () => {
     expect(selectPages(10, undefined, 4)).toEqual({ pages: [1, 2, 3, 4], truncated: true });
+  });
+
+  it("dedupes repeated page numbers, keeping first-seen order", () => {
+    expect(selectPages(3, [1, 1, 2, 2, 1])).toEqual({ pages: [1, 2], truncated: false });
   });
 });

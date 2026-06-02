@@ -25,6 +25,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Gate the release on a green suite — never ship an untested binary.
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
       - name: Build standalone binaries
         run: |
           mkdir -p dist

@@ -62,15 +62,19 @@ function joinPath(host: string, path: string): string {
   return `http://${host}/${path.replace(/^\/+/, "")}`;
 }
 
-async function fetchWithTimeout(
-  url: string,
+/**
+ * Run `fn` with an `AbortSignal` that fires after `timeoutMs`, so the timeout bounds
+ * the *whole* operation — including streaming the response body, not just the headers.
+ * Anything `fn` does with the signal (fetch, body reads) is cancelled on timeout.
+ */
+async function withAbortTimeout<T>(
   timeoutMs: number,
-  init?: RequestInit,
-): Promise<Response> {
+  fn: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fn(controller.signal);
   } finally {
     clearTimeout(timer);
   }
@@ -81,6 +85,8 @@ async function fetchWithTimeout(
  * quotes, so the single-quote delimiters are unambiguous; the non-greedy `}'`
  * terminator only matches the real end of the object. (A filename containing `}'`
  * would defeat this — a limitation shared with other Browse & Access clients.)
+ * Apostrophes inside the JS string literal arrive escaped as `\'`, which isn't valid
+ * JSON, so they're un-escaped before parsing.
  */
 function extractListingJson(html: string): string {
   const match = html.match(/const\s+json\s*=\s*'(\{[\s\S]*?\})'/);
@@ -90,7 +96,7 @@ function extractListingJson(html: string): string {
         "page format may differ from what this client expects.",
     );
   }
-  return match[1];
+  return match[1].replace(/\\'/g, "'");
 }
 
 /** List a directory on the device. `path` is relative to the Browse & Access root ("/" = root). */
@@ -104,21 +110,22 @@ export async function listFiles(
   return withDeviceAddress(
     ipArg,
     { port, probe: isBrowseHost, discover: opts.discover, messages: browseMessages(port), onDiscovered },
-    async (host) => {
-      const res = await fetchWithTimeout(joinPath(host, path), timeoutMs);
-      if (!res.ok) throw new Error(`Browse & Access returned HTTP ${res.status} for "${path}".`);
-      const parsed = JSON.parse(extractListingJson(await res.text())) as {
-        fileList?: Partial<FileEntry>[];
-      };
-      return (parsed.fileList ?? []).map((f) => ({
-        name: f.name ?? "",
-        isDirectory: Boolean(f.isDirectory),
-        uri: f.uri ?? "",
-        extension: f.extension ?? "",
-        size: Number(f.size ?? 0),
-        date: f.date ?? "",
-      }));
-    },
+    (host) =>
+      withAbortTimeout(timeoutMs, async (signal) => {
+        const res = await fetch(joinPath(host, path), { signal });
+        if (!res.ok) throw new Error(`Browse & Access returned HTTP ${res.status} for "${path}".`);
+        const parsed = JSON.parse(extractListingJson(await res.text())) as {
+          fileList?: Partial<FileEntry>[];
+        };
+        return (parsed.fileList ?? []).map((f) => ({
+          name: f.name ?? "",
+          isDirectory: Boolean(f.isDirectory),
+          uri: f.uri ?? "",
+          extension: f.extension ?? "",
+          size: Number(f.size ?? 0),
+          date: f.date ?? "",
+        }));
+      }),
   );
 }
 
@@ -133,23 +140,54 @@ export async function downloadFile(
   return withDeviceAddress(
     ipArg,
     { port, probe: isBrowseHost, discover: opts.discover, messages: browseMessages(port), onDiscovered },
-    async (host) => {
-      const res = await fetchWithTimeout(joinPath(host, uri), timeoutMs);
-      if (!res.ok) throw new Error(`Browse & Access returned HTTP ${res.status} for "${uri}".`);
-      const contentType = res.headers.get("content-type") ?? "";
-      if (contentType.includes("text/html")) {
-        throw new Error(
-          `Expected a file at "${uri}" but the device returned an HTML page — the path may be stale ` +
-            "or a directory. List the parent directory and use the entry's `uri`.",
-        );
-      }
-      const bytes = Buffer.from(await res.arrayBuffer());
-      if (bytes.length > MAX_DOWNLOAD_BYTES) {
-        throw new Error(`File at "${uri}" exceeds the ${MAX_DOWNLOAD_BYTES}-byte download limit.`);
-      }
-      return bytes;
-    },
+    (host) =>
+      withAbortTimeout(timeoutMs, async (signal) => {
+        const res = await fetch(joinPath(host, uri), { signal });
+        if (!res.ok) throw new Error(`Browse & Access returned HTTP ${res.status} for "${uri}".`);
+        const contentType = res.headers.get("content-type") ?? "";
+        if (contentType.includes("text/html")) {
+          throw new Error(
+            `Expected a file at "${uri}" but the device returned an HTML page — the path may be stale ` +
+              "or a directory. List the parent directory and use the entry's `uri`.",
+          );
+        }
+        return readCapped(res, uri);
+      }),
   );
+}
+
+/**
+ * Read a response body into a Buffer, refusing to over-read: reject early on a
+ * `Content-Length` that already exceeds the cap, and abort mid-stream the moment the
+ * running total crosses it — so an oversized (or endless) body never buffers fully.
+ */
+async function readCapped(res: Response, uri: string): Promise<Buffer> {
+  const tooBig = (): Error =>
+    new Error(`File at "${uri}" exceeds the ${MAX_DOWNLOAD_BYTES}-byte download limit.`);
+
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) throw tooBig();
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > MAX_DOWNLOAD_BYTES) throw tooBig();
+    return bytes;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_DOWNLOAD_BYTES) {
+      await reader.cancel();
+      throw tooBig();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }
 
 /**
@@ -167,20 +205,30 @@ export async function uploadFile(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   await withDeviceAddress(
     ipArg,
-    { port, probe: isBrowseHost, discover: opts.discover, messages: browseMessages(port), onDiscovered },
-    async (host) => {
-      const form = new FormData();
-      form.append("file", new Blob([bytes]), filename);
-      const res = await fetchWithTimeout(joinPath(host, directory), timeoutMs, {
-        method: "POST",
-        body: form,
-      });
-      if (!res.ok) {
-        throw new Error(
-          `Browse & Access upload of "${filename}" to "${directory}" failed: HTTP ${res.status}.`,
-        );
-      }
+    {
+      port,
+      probe: isBrowseHost,
+      discover: opts.discover,
+      // A write must not be replayed against a rediscovered device after a timeout.
+      idempotent: false,
+      messages: browseMessages(port),
+      onDiscovered,
     },
+    (host) =>
+      withAbortTimeout(timeoutMs, async (signal) => {
+        const form = new FormData();
+        form.append("file", new Blob([bytes]), filename);
+        const res = await fetch(joinPath(host, directory), {
+          method: "POST",
+          body: form,
+          signal,
+        });
+        if (!res.ok) {
+          throw new Error(
+            `Browse & Access upload of "${filename}" to "${directory}" failed: HTTP ${res.status}.`,
+          );
+        }
+      }),
   );
 }
 

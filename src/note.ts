@@ -24,9 +24,17 @@ export interface NoteText {
   hasText: boolean;
 }
 
-/** Parse raw `.note` bytes. Throws if the buffer isn't a recognisable Supernote file. */
+/** Parse raw `.note` bytes. Throws a clear error if the buffer isn't a Supernote note. */
 export function parseNote(bytes: Buffer): SupernoteX {
-  return new SupernoteX(bytes);
+  try {
+    return new SupernoteX(bytes);
+  } catch (err) {
+    throw new Error(
+      "This file isn't a readable Supernote note (.note) — it may be a different format (e.g. a PDF " +
+        `or image), an unsupported firmware version, or corrupted: ${(err as Error).message}`,
+      { cause: err },
+    );
+  }
 }
 
 /**
@@ -66,19 +74,32 @@ export function selectPages(
   max = DEFAULT_MAX_RENDER_PAGES,
 ): { pages: number[]; truncated: boolean } {
   const all = Array.from({ length: total }, (_, i) => i + 1);
-  const chosen = (requested && requested.length > 0 ? requested : all).filter(
-    (n) => Number.isInteger(n) && n >= 1 && n <= total,
-  );
+  const source = requested && requested.length > 0 ? requested : all;
+  const seen = new Set<number>();
+  const chosen: number[] = [];
+  for (const n of source) {
+    if (Number.isInteger(n) && n >= 1 && n <= total && !seen.has(n)) {
+      seen.add(n);
+      chosen.push(n);
+    }
+  }
   const truncated = chosen.length > max;
   return { pages: truncated ? chosen.slice(0, max) : chosen, truncated };
 }
+
+/** Renders selected pages of a note to `image-js` images (defaults to the real `toImage`). */
+export type PageRenderer = (
+  note: SupernoteX,
+  pageNumbers: number[],
+) => Promise<{ toBase64: () => string | Promise<string> }[]>;
 
 /** Render the given 1-indexed pages of a note to base64 PNGs. */
 export async function renderPages(
   note: SupernoteX,
   pageNumbers: number[],
+  render: PageRenderer = toImage,
 ): Promise<RenderedPage[]> {
-  const images = await toImage(note, pageNumbers);
+  const images = await render(note, pageNumbers);
   return Promise.all(
     images.map(async (image, idx) => {
       const raw = await image.toBase64();

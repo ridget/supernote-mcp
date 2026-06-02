@@ -115,7 +115,8 @@ describe("captureFrame", () => {
 
   it("falls back to discovery when the configured address is unreachable", async () => {
     fetchMirrorFrameImpl = async (host) => {
-      if (host.startsWith("192.168.1.5")) throw new Error("connection refused");
+      // A real unreachable host surfaces as a fetch TypeError, not an arbitrary Error.
+      if (host.startsWith("192.168.1.5")) throw new TypeError("fetch failed");
       return fakeImage();
     };
     discoverImpl = async () => "192.168.1.42";
@@ -124,6 +125,23 @@ describe("captureFrame", () => {
 
     expect(frame.base64).toBe("AAAA");
     expect(fetchedHosts).toEqual(["192.168.1.5:8080", "192.168.1.42:8080"]);
+  });
+
+  it("surfaces an operational error from a reachable device without scanning", async () => {
+    let discoverCalled = false;
+    discoverImpl = async () => {
+      discoverCalled = true;
+      return "192.168.1.42";
+    };
+    // The device answered but isn't serving a usable frame (a plain Error, not a TypeError).
+    fetchMirrorFrameImpl = async () => {
+      throw new Error("Invalid response. Expected multipart content type.");
+    };
+
+    // Discovery is enabled (default), yet an operational failure must not trigger a scan.
+    await expect(captureFrame("192.168.1.5")).rejects.toThrow(/Invalid response/);
+    expect(discoverCalled).toBe(false);
+    expect(fetchedHosts).toEqual(["192.168.1.5:8080"]);
   });
 
   it("scans when no address is configured and discovery is enabled", async () => {
@@ -135,13 +153,13 @@ describe("captureFrame", () => {
     expect(fetchedHosts).toEqual(["192.168.1.42:8080"]);
   });
 
-  it("errors with the configured address when reachable fails and discovery is off", async () => {
+  it("errors with the configured address when unreachable and discovery is off", async () => {
     fetchMirrorFrameImpl = async () => {
-      throw new Error("connection refused");
+      throw new TypeError("fetch failed");
     };
 
     await expect(captureFrame("192.168.1.5", { discover: false })).rejects.toThrow(
-      /Failed to capture a frame from the Supernote at 192\.168\.1\.5:8080.*connection refused/s,
+      /Failed to capture a frame from the Supernote at 192\.168\.1\.5:8080.*fetch failed/s,
     );
   });
 
@@ -161,7 +179,7 @@ describe("captureFrame", () => {
 
   it("reports both the unreachable address and the empty scan when discovery fails", async () => {
     fetchMirrorFrameImpl = async () => {
-      throw new Error("connection refused");
+      throw new TypeError("fetch failed");
     };
     discoverImpl = async () => null;
 
