@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import { downloadFile, listFiles } from "../src/browse.js";
+import { downloadFile, listFiles, uploadFile } from "../src/browse.js";
 
 const realFetch = globalThis.fetch;
 const NO_DISCOVER = { discover: false } as const;
@@ -89,5 +89,30 @@ describe("downloadFile", () => {
     await expect(downloadFile("192.0.2.10", "stale/path", NO_DISCOVER)).rejects.toThrow(
       /returned an HTML page/,
     );
+  });
+});
+
+describe("uploadFile", () => {
+  it("POSTs the file as multipart form-data to the target directory", async () => {
+    let captured: { url: string; method?: string; body: unknown } | undefined;
+    globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
+      captured = { url: url.toString(), method: init?.method, body: init?.body };
+      return new Response("", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await uploadFile("192.0.2.10", "/Note", "hello.txt", Buffer.from("hi"), NO_DISCOVER);
+
+    expect(captured?.method).toBe("POST");
+    expect(captured?.url).toBe("http://192.0.2.10:8089/Note");
+    expect(captured?.body).toBeInstanceOf(FormData);
+    const file = (captured?.body as FormData).get("file");
+    expect(file).toBeInstanceOf(Blob);
+  });
+
+  it("rejects when the device responds with a non-OK status", async () => {
+    globalThis.fetch = mock(async () => new Response("nope", { status: 500 })) as unknown as typeof fetch;
+    await expect(
+      uploadFile("192.0.2.10", "/", "x.txt", Buffer.from("y"), NO_DISCOVER),
+    ).rejects.toThrow(/HTTP 500/);
   });
 });

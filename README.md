@@ -98,9 +98,13 @@ LAN scan) and return a clear, actionable message on failure rather than hanging.
 | `supernote_list_files` | Browse & Access (8089) | `ip?`, `path?` | a listing — name, folder?, size, date, and a `path` to pass on |
 | `supernote_read_note` | Browse & Access (8089) | `ip?`, `path` | a note's recognized handwriting/text per page (or a note that recognition hasn't run) |
 | `supernote_render_note` | Browse & Access (8089) | `ip?`, `path`, `pages?` | note pages as `image/png` (all pages, capped at 20, or the `pages` you pick) |
+| `supernote_upload_file` | Browse & Access (8089) | `ip?`, `path`, `directory?`, `filename?` | uploads a **local** file to the device (the only tool that **writes** to it) |
 
 Failures point at the usual causes — wrong IP, the relevant feature turned off, or the host/device
 not sharing a VPN-free Wi-Fi network — and time out fast (10s) rather than hanging.
+
+All tools except `supernote_upload_file` are read-only. `supernote_upload_file` **writes** a file to
+the device (it reads a local file the server can access and POSTs it over Browse & Access).
 
 ## Local development
 
@@ -114,9 +118,10 @@ bun install
 # Capture-first verification against a real device (writes a PNG you can open):
 bun run src/capture.ts --ip 192.168.1.42 --out frame.png
 
-# Browse & Access (port 8089) — list a directory, download a file:
+# Browse & Access (port 8089) — list a directory, download a file, upload a file:
 bun run src/browse.ts list --ip 192.168.1.42 --path /Note
 bun run src/browse.ts get  --ip 192.168.1.42 --path /Note/obsidian/x.note --out x.note
+bun run src/browse.ts put  --ip 192.168.1.42 --path ./doc.pdf --dir /INBOX
 
 # Run the MCP server over stdio:
 bun run src/server.ts

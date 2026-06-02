@@ -1,4 +1,5 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { isBrowseHost } from "./discover.js";
 import { withDeviceAddress, type ResolveMessages } from "./resolve.js";
 
@@ -61,11 +62,15 @@ function joinPath(host: string, path: string): string {
   return `http://${host}/${path.replace(/^\/+/, "")}`;
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs: number,
+  init?: RequestInit,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -148,19 +153,54 @@ export async function downloadFile(
 }
 
 /**
+ * Upload `bytes` to `directory` on the device as `filename`, via a multipart POST
+ * (`file` field) to the Browse & Access server. Writes to the device.
+ */
+export async function uploadFile(
+  ipArg: string | undefined,
+  directory: string,
+  filename: string,
+  bytes: Buffer,
+  opts: BrowseOptions = {},
+): Promise<void> {
+  const port = opts.port ?? DEFAULT_PORT;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await withDeviceAddress(
+    ipArg,
+    { port, probe: isBrowseHost, discover: opts.discover, messages: browseMessages(port), onDiscovered },
+    async (host) => {
+      const form = new FormData();
+      form.append("file", new Blob([bytes]), filename);
+      const res = await fetchWithTimeout(joinPath(host, directory), timeoutMs, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        throw new Error(
+          `Browse & Access upload of "${filename}" to "${directory}" failed: HTTP ${res.status}.`,
+        );
+      }
+    },
+  );
+}
+
+/**
  * CLI for local verification:
  *   bun src/browse.ts list --ip <ip[:port]> [--path /]
  *   bun src/browse.ts get  --ip <ip[:port]> --path <uri> --out <file>
+ *   bun src/browse.ts put  --ip <ip[:port]> --path <local file> [--dir <remote dir>]
  */
 async function main(argv: string[]): Promise<void> {
   const cmd = argv[0];
   let ip: string | undefined;
   let path = "/";
   let out = "";
+  let dir = "/";
   for (let i = 1; i < argv.length; i++) {
     if (argv[i] === "--ip") ip = argv[++i];
     else if (argv[i] === "--path") path = argv[++i] ?? path;
     else if (argv[i] === "--out") out = argv[++i] ?? out;
+    else if (argv[i] === "--dir") dir = argv[++i] ?? dir;
   }
 
   if (cmd === "list") {
@@ -176,8 +216,13 @@ async function main(argv: string[]): Promise<void> {
     const bytes = await downloadFile(ip, path);
     writeFileSync(out, bytes);
     console.error(`Downloaded ${bytes.length} bytes -> ${out}`);
+  } else if (cmd === "put") {
+    const bytes = readFileSync(path);
+    const name = basename(path);
+    await uploadFile(ip, dir, name, bytes);
+    console.error(`Uploaded ${name} (${bytes.length} bytes) -> ${dir}`);
   } else {
-    throw new Error("usage: browse.ts <list|get> --ip <ip> [--path <p>] [--out <f>]");
+    throw new Error("usage: browse.ts <list|get|put> --ip <ip> [--path <p>] [--out <f>] [--dir <d>]");
   }
 }
 

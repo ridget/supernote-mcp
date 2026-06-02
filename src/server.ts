@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { downloadFile, listFiles } from "./browse.js";
+import { downloadFile, listFiles, uploadFile } from "./browse.js";
 import { captureFrame } from "./capture.js";
 import { extractText, parseNote, renderPages, selectPages } from "./note.js";
 
@@ -226,6 +228,59 @@ server.registerTool(
         content.push({ type: "image", data: r.base64, mimeType: r.mimeType });
       }
       return { content };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [
+          { type: "text", text: err instanceof Error ? err.message : String(err) },
+        ],
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "supernote_upload_file",
+  {
+    title: "Upload a file to the Supernote",
+    description:
+      "Upload a local file to the user's Supernote e-ink tablet over its Browse & Access Wi-Fi " +
+      "server. Use this to put a document on the device for the user to read or annotate — e.g. a " +
+      "PDF or file the agent just created or downloaded. This WRITES to the device. Give the local " +
+      "file `path`; optionally a target `directory` on the device (a `path` from supernote_list_files, " +
+      "default root) and a `filename` to save as (default: the local file's name). Requires Browse & " +
+      "Access enabled, same Wi-Fi, no VPN/proxy.",
+    inputSchema: {
+      ip: ipSchema,
+      path: z.string().describe("Local filesystem path of the file to upload."),
+      directory: z
+        .string()
+        .optional()
+        .describe("Target folder on the device (a `path` from supernote_list_files). Defaults to the root."),
+      filename: z
+        .string()
+        .optional()
+        .describe("Name to save the file as on the device. Defaults to the local file's name."),
+    },
+    annotations: {
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+  },
+  async ({ ip, path, directory, filename }) => {
+    try {
+      const bytes = readFileSync(path);
+      const name = filename ?? basename(path);
+      const dir = directory ?? "/";
+      await uploadFile(ip, dir, name, bytes);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Uploaded "${name}" (${bytes.length} bytes) to ${dir === "/" ? "the device root" : dir}.`,
+          },
+        ],
+      };
     } catch (err) {
       return {
         isError: true,
