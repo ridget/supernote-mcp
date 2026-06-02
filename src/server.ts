@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { downloadFile, listFiles } from "./browse.js";
 import { captureFrame } from "./capture.js";
-import { extractText, parseNote } from "./note.js";
+import { extractText, parseNote, renderPages, selectPages } from "./note.js";
 
 const server = new McpServer({
   name: "supernote-mcp",
@@ -157,6 +157,75 @@ server.registerTool(
         };
       }
       return { content: [{ type: "text", text: combinedText }] };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [
+          { type: "text", text: err instanceof Error ? err.message : String(err) },
+        ],
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "supernote_render_note",
+  {
+    title: "Render Supernote note pages as images",
+    description:
+      "Render the pages of a saved Supernote note (.note file) as images. Call this when the user " +
+      "wants to SEE a note — sketches, diagrams, drawings — or when supernote_read_note reported the " +
+      "note has no recognized text. Use supernote_list_files first to get the note's `path`. By " +
+      "default renders all pages (capped); pass `pages` to select specific 1-indexed pages. Prefer " +
+      "supernote_read_note when the user only wants the words (text is far cheaper than images). " +
+      "Requires Browse & Access enabled, same Wi-Fi, no VPN/proxy.",
+    inputSchema: {
+      ip: ipSchema,
+      path: z
+        .string()
+        .describe("The note's `path` from supernote_list_files, e.g. /Note/obsidian/sketch.note."),
+      pages: z
+        .array(z.number().int().positive())
+        .optional()
+        .describe("1-indexed page numbers to render. Defaults to all pages (capped at 20)."),
+    },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ ip, path, pages }) => {
+    try {
+      const note = parseNote(await downloadFile(ip, path));
+      const total = note.pages.length;
+      const { pages: wanted, truncated } = selectPages(total, pages);
+      if (wanted.length === 0) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `This note has ${total} page(s); the requested page numbers are out of range.`,
+            },
+          ],
+        };
+      }
+      const rendered = await renderPages(note, wanted);
+      const content: (
+        | { type: "text"; text: string }
+        | { type: "image"; data: string; mimeType: string }
+      )[] = [];
+      if (truncated) {
+        content.push({
+          type: "text",
+          text: `Showing the first ${wanted.length} of ${total} pages. Pass \`pages\` to pick others.`,
+        });
+      }
+      for (const r of rendered) {
+        content.push({ type: "text", text: `Page ${r.page}:` });
+        content.push({ type: "image", data: r.base64, mimeType: r.mimeType });
+      }
+      return { content };
     } catch (err) {
       return {
         isError: true,

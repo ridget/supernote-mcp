@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { SupernoteX } from "supernote-typescript";
-import { extractText } from "../src/note.js";
+import { extractText, selectPages } from "../src/note.js";
 
 // extractText only reads `.pages`, so a plain object stands in for a parsed note —
 // no need to mock the shared supernote-typescript module (which would clobber the
@@ -54,5 +54,19 @@ describe("extractText", () => {
 
     expect(result.combinedText).toBe("--- Page 1 ---\nfirst\n\n--- Page 3 ---\nthird");
     expect(result.pages).toHaveLength(3);
+  });
+});
+
+describe("selectPages", () => {
+  it("defaults to all pages when none are requested", () => {
+    expect(selectPages(3, undefined)).toEqual({ pages: [1, 2, 3], truncated: false });
+  });
+
+  it("keeps the requested order and drops out-of-range numbers", () => {
+    expect(selectPages(3, [3, 1, 9, 0])).toEqual({ pages: [3, 1], truncated: false });
+  });
+
+  it("caps at the max and flags truncation", () => {
+    expect(selectPages(10, undefined, 4)).toEqual({ pages: [1, 2, 3, 4], truncated: true });
   });
 });
