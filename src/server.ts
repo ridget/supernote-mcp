@@ -8,21 +8,40 @@ import { downloadFile, listFiles, uploadFile } from "./browse.js";
 import { captureFrame } from "./capture.js";
 import { extractText, parseNote, renderPages, selectPages } from "./note.js";
 
-const server = new McpServer({
-  name: "supernote-mcp",
-  version: "0.2.0",
-});
+const server = new McpServer(
+  {
+    name: "supernote-mcp",
+    version: "0.2.1",
+  },
+  {
+    instructions: [
+      "Tools to see and work with the user's Ratta Supernote e-ink tablet over the local network.",
+      "",
+      "Pick a tool by intent:",
+      "- The live screen right now (user is sketching/whiteboarding, \"what did I just draw?\"): supernote_snapshot.",
+      "- Find a saved notebook or file: supernote_list_files — returns each entry's `path`.",
+      "- Read a saved note's words: supernote_read_note — recognized handwriting as text. Cheap and accurate; prefer it when the user wants the content.",
+      "- See a saved note's pages (sketches/diagrams, or when read_note reports no recognized text): supernote_render_note.",
+      "- Put a file onto the device: supernote_upload_file — the only tool that writes to the tablet.",
+      "",
+      "Saved-note flow: supernote_list_files → take the entry's `path` → supernote_read_note (text) or supernote_render_note (images). supernote_snapshot is the current screen, not a saved file.",
+      "Setup: the device and this host must share Wi-Fi (no VPN). Set SUPERNOTE_IP or let discovery find it. Screen Mirroring (for snapshot) and Browse & Access (for the file/note tools) are separate features the user toggles on the device; a tool fails clearly if its feature is off.",
+    ].join("\n"),
+  },
+);
 
 server.registerTool(
   "supernote_snapshot",
   {
     title: "Supernote snapshot",
     description:
-      "Capture what is currently drawn on the user's Supernote e-ink tablet (its live screen mirror) " +
-      "and return it as an image. Call this whenever the user refers to something they sketched, drew, " +
-      "diagrammed, or handwrote on their Supernote during a whiteboarding or planning session — for " +
-      'example "what did I just draw?", "look at my sketch", or "read what I wrote". Requires Screen ' +
-      "Mirroring enabled on the device, with the device and this host on the same Wi-Fi and no VPN/proxy.",
+      "Capture the user's Supernote e-ink tablet's LIVE screen right now (its screen mirror) and " +
+      "return it as an image. Call this when the user refers to what's currently on the tablet — what " +
+      'they just sketched, drew, or handwrote during a whiteboarding/planning session ("what did I ' +
+      'just draw?", "look at my screen", "see my sketch"). This is the current screen, NOT a saved ' +
+      "file: to read or show a notebook saved earlier, use supernote_list_files then " +
+      "supernote_read_note (text) or supernote_render_note (images). Requires Screen Mirroring enabled " +
+      "on the device, with the device and this host on the same Wi-Fi and no VPN/proxy.",
     inputSchema: {
       ip: z
         .string()

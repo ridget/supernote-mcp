@@ -1,14 +1,17 @@
 # supernote-mcp
 
-An [MCP](https://modelcontextprotocol.io) server that captures the **live screen mirror** of a
-[Ratta Supernote](https://supernote.com) e-ink tablet and returns it as an image to an AI agent.
+An [MCP](https://modelcontextprotocol.io) server for the [Ratta Supernote](https://supernote.com)
+e-ink tablet. It lets an AI agent **see and work with your Supernote over the local Wi-Fi network**:
 
-Sketch or handwrite on your Supernote during a planning/whiteboarding session, then ask your agent
-"what did I just draw?" — it pulls the current canvas in as vision input and reasons over it inline.
+- **Grab the live screen** while you sketch or handwrite — *"what did I just draw?"*
+- **Browse and read your saved notebooks** — recognized handwriting as **text**, or pages as **images**.
+- **Upload files** to the device for you to read or annotate.
 
-Beyond the live screen, it can also browse the device's saved files over its **Browse & Access**
-Wi-Fi server. Every tool is **lazy** — it touches the device only when invoked, so a session that
-never calls one makes no network calls to the tablet.
+The idea is collaborative prompting: handwrite on the tablet during a planning session and pull it
+straight into the conversation, or have the agent read and reason over notes you saved earlier.
+
+Every tool is **lazy** — it touches the device only when invoked, so a session that never calls one
+makes no network calls to the tablet.
 
 > [!IMPORTANT]
 > **Unofficial, community-built project — not affiliated with, authorised by, or endorsed by
@@ -105,6 +108,23 @@ not sharing a VPN-free Wi-Fi network — and time out fast (10s) rather than han
 
 All tools except `supernote_upload_file` are read-only. `supernote_upload_file` **writes** a file to
 the device (it reads a local file the server can access and POSTs it over Browse & Access).
+
+### Choosing the right tool
+
+The server also ships this routing as MCP `instructions`, so a connected agent picks the right tool
+on its own. The map:
+
+| You want… | Say something like | Tool |
+|-----------|--------------------|------|
+| What's on the screen *right now* | "what did I just draw?", "look at my screen" | `supernote_snapshot` |
+| To find a saved note | "what notes do I have?", "find my note about X" | `supernote_list_files` |
+| To read a note's words | "read / summarise my meeting notes" | `supernote_read_note` |
+| To see a note's pages | "show me that sketch", "look at page 2" | `supernote_render_note` |
+| To put a file on the tablet | "send this PDF to my Supernote" | `supernote_upload_file` |
+
+**Saved-note flow:** `supernote_list_files` → take the entry's `path` → `supernote_read_note` (text,
+cheap — prefer for words) or `supernote_render_note` (images, for drawings or notes without
+recognized text). `supernote_snapshot` is separate — it's the *current screen*, not a saved file.
 
 ## Local development
 
