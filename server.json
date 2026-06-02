@@ -2,18 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ridget/supernote-mcp",
   "title": "Supernote",
-  "description": "Pulls a Ratta Supernote e-ink tablet's live screen-mirror in as image input for AI agents.",
+  "description": "Capture the screen, read/render notes, and upload files on a Ratta Supernote from an AI agent.",
   "repository": {
     "url": "https://github.com/ridget/supernote-mcp",
     "source": "github"
   },
-  "version": "0.1.1",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "supernote-mcp",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },

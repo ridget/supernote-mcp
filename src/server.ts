@@ -10,7 +10,7 @@ import { extractText, parseNote, renderPages, selectPages } from "./note.js";
 
 const server = new McpServer({
   name: "supernote-mcp",
-  version: "0.1.1",
+  version: "0.2.0",
 });
 
 server.registerTool(
