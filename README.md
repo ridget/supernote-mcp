@@ -54,14 +54,17 @@ claude mcp add supernote --scope user --env SUPERNOTE_IP=192.168.1.42 -- npx -y 
 # If you already have Bun
 claude mcp add supernote --scope user --env SUPERNOTE_IP=192.168.1.42 -- bunx supernote-mcp
 
-# Standalone binary (no runtime needed) — download from Releases, then:
-claude mcp add supernote --scope user --env SUPERNOTE_IP=192.168.1.42 -- /path/to/supernote-mcp
+# Standalone binary (no runtime needed) — download the asset for your platform from the
+# latest GitHub Release (supernote-mcp-darwin-arm64, -darwin-x64, -linux-x64, -linux-arm64,
+# -windows-x64.exe), make it executable, then register its path:
+chmod +x ./supernote-mcp-darwin-arm64
+claude mcp add supernote --scope user --env SUPERNOTE_IP=192.168.1.42 -- /path/to/supernote-mcp-darwin-arm64
 ```
 
 Restart Claude Code, then try: *"Snapshot my Supernote and tell me what I drew."*
 
 > On macOS the downloaded binary is unsigned; the first run may be blocked by Gatekeeper.
-> Right-click → Open once, or run `xattr -d com.apple.quarantine /path/to/supernote-mcp`.
+> Right-click → Open once, or run `xattr -d com.apple.quarantine /path/to/supernote-mcp-darwin-arm64`.
 
 ## The tool
 

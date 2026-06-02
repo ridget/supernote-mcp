@@ -1,0 +1,47 @@
+name: release
+
+# Build the self-contained binaries and attach them to the GitHub Release
+# whenever a version tag is pushed. bun build --compile cross-compiles every
+# target from a single runner, so one Linux job produces all platforms.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build standalone binaries
+        run: |
+          mkdir -p dist
+          for target in \
+            bun-darwin-arm64 \
+            bun-darwin-x64 \
+            bun-linux-x64 \
+            bun-linux-arm64 \
+            bun-windows-x64; do
+            echo "Building supernote-mcp-${target#bun-} ..."
+            bun build --compile --target="$target" \
+              src/server.ts --outfile "dist/supernote-mcp-${target#bun-}"
+          done
+          ls -la dist
+
+      - name: Publish release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/supernote-mcp-*
+          generate_release_notes: true
