@@ -1,24 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import * as realDiscover from "../src/discover.js";
+import * as realSupernote from "supernote-typescript";
 
 // Stand-ins the mocked modules delegate to, swapped per test.
 let fetchMirrorFrameImpl: (ip: string) => Promise<{ toBase64: () => Promise<string> }>;
 let discoverImpl: () => Promise<string | null>;
 const fetchedHosts: string[] = [];
 
+// bun's mock.module is global, so a *partial* mock would strip the other exports
+// (SupernoteX, toImage, isMirrorHost, hostsForInterface, …) for every other test
+// file that imports them — failing depending on file load order. Spread the real
+// module and override only what these tests need.
 mock.module("supernote-typescript", () => ({
+  ...realSupernote,
   fetchMirrorFrame: (ip: string) => {
     fetchedHosts.push(ip);
     return fetchMirrorFrameImpl(ip);
   },
-  // Stubs so other modules that import these (e.g. note.ts) still link when this
-  // mock is the active one; unused by the capture tests themselves.
-  SupernoteX: class {
-    pages: unknown[] = [];
-    constructor(_bytes: Uint8Array) {}
-  },
-  toImage: async () => [],
 }));
 mock.module("../src/discover.js", () => ({
+  ...realDiscover,
   discoverSupernote: () => discoverImpl(),
 }));
 
