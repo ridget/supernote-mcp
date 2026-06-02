@@ -1,16 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import * as realDiscover from "../src/discover.js";
+import type { DiscoverOptions } from "../src/discover.js";
 import * as realSupernote from "supernote-typescript";
 
 // Stand-ins the mocked modules delegate to, swapped per test.
 let fetchMirrorFrameImpl: (ip: string) => Promise<{ toBase64: () => Promise<string> }>;
-let discoverImpl: () => Promise<string | null>;
 const fetchedHosts: string[] = [];
 
-// bun's mock.module is global, so a *partial* mock would strip the other exports
-// (SupernoteX, toImage, isMirrorHost, hostsForInterface, …) for every other test
-// file that imports them — failing depending on file load order. Spread the real
-// module and override only what these tests need.
+// bun's mock.module is process-global and persists across files, so these mocks
+// also bind in every other test file that imports the same module. Two defences:
+//  1. Spread the real module so a partial mock never strips the other exports
+//     (SupernoteX, toImage, isMirrorHost, hostsForInterface, …).
+//  2. Route discoverSupernote through a mutable `discoverImpl` that *defaults to the
+//     real implementation* and is restored after every capture test — so discover.test.ts
+//     exercises the genuine scanner regardless of test-file load order.
+const realDiscoverSupernote = (opts?: DiscoverOptions) => realDiscover.discoverSupernote(opts);
+let discoverImpl: (opts?: DiscoverOptions) => Promise<string | null> = realDiscoverSupernote;
+
 mock.module("supernote-typescript", () => ({
   ...realSupernote,
   fetchMirrorFrame: (ip: string) => {
@@ -20,7 +26,7 @@ mock.module("supernote-typescript", () => ({
 }));
 mock.module("../src/discover.js", () => ({
   ...realDiscover,
-  discoverSupernote: () => discoverImpl(),
+  discoverSupernote: (opts?: DiscoverOptions) => discoverImpl(opts),
 }));
 
 // Import after the mocks are registered so capture.ts binds to them.
@@ -96,6 +102,9 @@ describe("captureFrame", () => {
     else process.env[ENV_KEY] = originalIp;
     if (originalDiscover === undefined) delete process.env[DISCOVER_KEY];
     else process.env[DISCOVER_KEY] = originalDiscover;
+    // Hand discoverSupernote back to the real implementation so the global module
+    // mock doesn't leak a capture-test stub into other files (e.g. discover.test.ts).
+    discoverImpl = realDiscoverSupernote;
   });
 
   it("fast path: captures from the configured address and never scans", async () => {
