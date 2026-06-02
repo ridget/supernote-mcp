@@ -51,28 +51,32 @@ export function enumerateCandidates(
   return [...out];
 }
 
-/**
- * Probe one host: is it serving the Supernote mirror (a multipart stream) on `port`?
- * Aborts on its own `timeoutMs`, or earlier if the caller's `signal` fires (e.g. once
- * another probe has already found the device).
- */
-export async function isMirrorHost(
+/** A reachability probe for one host:port — resolves true if it looks like the target service. */
+export type Probe = (
   host: string,
   port: number,
-  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  timeoutMs?: number,
   signal?: AbortSignal,
+) => Promise<boolean>;
+
+/**
+ * Fetch `url` with a fail-fast timeout (and an optional external abort signal so a
+ * concurrent scan can cancel it), hand the response to `inspect`, and never throw —
+ * connection errors resolve to false.
+ */
+async function probeHost(
+  url: string,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+  inspect: (res: Response, controller: AbortController) => boolean | Promise<boolean>,
 ): Promise<boolean> {
   const controller = new AbortController();
   const onExternalAbort = (): void => controller.abort();
   const timer = setTimeout(onExternalAbort, timeoutMs);
   signal?.addEventListener("abort", onExternalAbort, { once: true });
   try {
-    const res = await fetch(`http://${host}:${port}${MIRROR_PATH}`, {
-      signal: controller.signal,
-    });
-    const contentType = res.headers.get("content-type") ?? "";
-    controller.abort(); // we only needed the headers; don't drain the stream
-    return res.ok && contentType.includes("multipart");
+    const res = await fetch(url, { signal: controller.signal });
+    return await inspect(res, controller);
   } catch {
     return false;
   } finally {
@@ -81,10 +85,30 @@ export async function isMirrorHost(
   }
 }
 
+/**
+ * Probe one host: is it serving the Supernote mirror (a multipart stream) on `port`?
+ * Aborts on its own `timeoutMs`, or earlier if the caller's `signal` fires (e.g. once
+ * another probe has already found the device).
+ */
+export function isMirrorHost(
+  host: string,
+  port: number,
+  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return probeHost(`http://${host}:${port}${MIRROR_PATH}`, timeoutMs, signal, (res, controller) => {
+    const contentType = res.headers.get("content-type") ?? "";
+    controller.abort(); // we only needed the headers; don't drain the stream
+    return res.ok && contentType.includes("multipart");
+  });
+}
+
 export interface DiscoverOptions {
   port?: number;
   timeoutMs?: number;
   concurrency?: number;
+  /** How to recognise the device on each host (defaults to the mirror probe). */
+  probe?: Probe;
   /** Override the candidate list (defaults to this machine's subnets). */
   candidates?: string[];
 }
@@ -98,6 +122,7 @@ export async function discoverSupernote(opts: DiscoverOptions = {}): Promise<str
   const port = opts.port ?? 8080;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const concurrency = opts.concurrency ?? DEFAULT_CONCURRENCY;
+  const probe = opts.probe ?? isMirrorHost;
   const candidates = opts.candidates ?? enumerateCandidates();
 
   if (candidates.length === 0) return null;
@@ -114,7 +139,7 @@ export async function discoverSupernote(opts: DiscoverOptions = {}): Promise<str
     const launch = (): void => {
       if (done || next >= candidates.length) return;
       const host = candidates[next++]!;
-      void isMirrorHost(host, port, timeoutMs, controller.signal).then((ok) => {
+      void probe(host, port, timeoutMs, controller.signal).then((ok) => {
         settled++;
         if (done) return;
         if (ok) {

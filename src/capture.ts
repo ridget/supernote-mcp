@@ -1,6 +1,10 @@
 import { writeFileSync } from "node:fs";
 import { fetchMirrorFrame } from "supernote-typescript";
-import { discoverSupernote } from "./discover.js";
+import { isMirrorHost } from "./discover.js";
+import { configuredAddress, discoveryEnabled, withDeviceAddress, withPort } from "./resolve.js";
+
+// Re-exported for callers/tests that import these from the capture module.
+export { configuredAddress, discoveryEnabled, withPort };
 
 /** A single captured frame from the Supernote screen mirror. */
 export interface Frame {
@@ -14,35 +18,6 @@ export interface Frame {
 
 const DEFAULT_PORT = 8080;
 const DEFAULT_TIMEOUT_MS = 10_000;
-
-/** Configured device address from an explicit value, then the SUPERNOTE_IP env var. */
-export function configuredAddress(explicit?: string): string | undefined {
-  return explicit?.trim() || process.env.SUPERNOTE_IP?.trim() || undefined;
-}
-
-/** Whether LAN discovery may be used as a fallback (disable with SUPERNOTE_DISCOVER=0). */
-export function discoveryEnabled(override?: boolean): boolean {
-  return override ?? process.env.SUPERNOTE_DISCOVER !== "0";
-}
-
-/**
- * Append the default mirror port unless the address already carries one.
- * Supernote mirroring is IPv4-only, but this stays correct for bracketed IPv6
- * (`[::1]` / `[::1]:8080`) and brackets a bare IPv6 literal before adding a port,
- * so a stray colon in an address is never mistaken for a port separator.
- */
-export function withPort(address: string, port: number): string {
-  if (address.startsWith("[")) {
-    // Bracketed IPv6: a port is present only as `]:<digits>`.
-    return /]:\d+$/.test(address) ? address : `${address}:${port}`;
-  }
-  if (address.indexOf(":") !== address.lastIndexOf(":")) {
-    // Bare IPv6 (more than one colon): bracket it so the port is unambiguous.
-    return `[${address}]:${port}`;
-  }
-  // IPv4 or hostname, optionally already suffixed with `:<port>`.
-  return /:\d+$/.test(address) ? address : `${address}:${port}`;
-}
 
 export interface CaptureOptions {
   /** Mirror port, default 8080. Ignored if the IP already includes a port. */
@@ -94,46 +69,34 @@ export async function captureFrame(
 ): Promise<Frame> {
   const port = opts.port ?? DEFAULT_PORT;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const canDiscover = discoveryEnabled(opts.discover);
-  const configured = configuredAddress(ipArg);
-
-  // Fast path: the configured address.
-  if (configured) {
-    try {
-      return await grabFrame(withPort(configured, port), timeoutMs);
-    } catch (err) {
-      if (!canDiscover) {
-        throw new Error(
-          `Failed to capture a frame from the Supernote at ${withPort(configured, port)}: ${(err as Error).message}. ` +
-            "Check that the IP matches the device's mirroring popup, that Screen Mirroring is still on, " +
-            "and that the device and this host share the same Wi-Fi with no VPN or proxy.",
-          { cause: err },
-        );
-      }
-      // fall through to discovery
-    }
-  } else if (!canDiscover) {
-    throw new Error(
-      "No Supernote IP provided and network discovery is disabled. Enable Screen Mirroring on the " +
-        "device (the popup shows an IP), then pass it as the `ip` argument or set SUPERNOTE_IP.",
-    );
-  }
-
-  // Fallback: scan the LAN for the mirror.
-  const found = await discoverSupernote({ port });
-  if (!found) {
-    throw new Error(
-      (configured
-        ? `Could not reach the Supernote at ${withPort(configured, port)}, and a scan of the local network `
-        : "No SUPERNOTE_IP was set, and a scan of the local network ") +
-        `found no device serving the mirror on port ${port}. ` +
-        "Check that Screen Mirroring is on and that this host shares the device's Wi-Fi with no VPN or proxy.",
-    );
-  }
-  console.error(
-    `[supernote-mcp] Discovered Supernote at ${found}. Set SUPERNOTE_IP=${found} to skip the scan next time.`,
+  return withDeviceAddress(
+    ipArg,
+    {
+      port,
+      probe: isMirrorHost,
+      discover: opts.discover,
+      messages: {
+        unreachableConfigured: (host, cause) =>
+          `Failed to capture a frame from the Supernote at ${host}: ${cause}. ` +
+          "Check that the IP matches the device's mirroring popup, that Screen Mirroring is still on, " +
+          "and that the device and this host share the same Wi-Fi with no VPN or proxy.",
+        noConfigDiscoverOff: () =>
+          "No Supernote IP provided and network discovery is disabled. Enable Screen Mirroring on the " +
+          "device (the popup shows an IP), then pass it as the `ip` argument or set SUPERNOTE_IP.",
+        scanFoundNothing: (configuredHost) =>
+          (configuredHost
+            ? `Could not reach the Supernote at ${configuredHost}, and a scan of the local network `
+            : "No SUPERNOTE_IP was set, and a scan of the local network ") +
+          `found no device serving the mirror on port ${port}. ` +
+          "Check that Screen Mirroring is on and that this host shares the device's Wi-Fi with no VPN or proxy.",
+      },
+      onDiscovered: (found) =>
+        console.error(
+          `[supernote-mcp] Discovered Supernote at ${found}. Set SUPERNOTE_IP=${found} to skip the scan next time.`,
+        ),
+    },
+    (host) => grabFrame(host, timeoutMs),
   );
-  return grabFrame(withPort(found, port), timeoutMs);
 }
 
 /**
