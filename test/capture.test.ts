@@ -10,6 +10,13 @@ mock.module("supernote-typescript", () => ({
     fetchedHosts.push(ip);
     return fetchMirrorFrameImpl(ip);
   },
+  // Stubs so other modules that import these (e.g. note.ts) still link when this
+  // mock is the active one; unused by the capture tests themselves.
+  SupernoteX: class {
+    pages: unknown[] = [];
+    constructor(_bytes: Uint8Array) {}
+  },
+  toImage: async () => [],
 }));
 mock.module("../src/discover.js", () => ({
   discoverSupernote: () => discoverImpl(),

@@ -2,8 +2,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { listFiles } from "./browse.js";
+import { downloadFile, listFiles } from "./browse.js";
 import { captureFrame } from "./capture.js";
+import { extractText, parseNote } from "./note.js";
 
 const server = new McpServer({
   name: "supernote-mcp",
@@ -103,6 +104,59 @@ server.registerTool(
           .join("  "),
       );
       return { content: [{ type: "text", text: lines.join("\n") }] };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [
+          { type: "text", text: err instanceof Error ? err.message : String(err) },
+        ],
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "supernote_read_note",
+  {
+    title: "Read a Supernote note as text",
+    description:
+      "Read the recognized handwriting and typed text from a saved Supernote note (.note file) as " +
+      "plain text. Call this when the user wants the CONTENTS of a specific note — e.g. \"read my " +
+      'notes from yesterday", "summarise my meeting notes", "what did I write in <note>". Use ' +
+      "supernote_list_files first to get the note's `path`. Returns recognized text per page — cheap " +
+      "and accurate, so prefer it over images when the user wants the words. If the note has no " +
+      "recognized text (on-device handwriting recognition wasn't run), it says so; use " +
+      "supernote_render_note for page images instead. Requires Browse & Access enabled, same Wi-Fi, " +
+      "no VPN/proxy.",
+    inputSchema: {
+      ip: ipSchema,
+      path: z
+        .string()
+        .describe("The note's `path` from supernote_list_files, e.g. /Note/obsidian/meeting.note."),
+    },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ ip, path }) => {
+    try {
+      const bytes = await downloadFile(ip, path);
+      const { pages, combinedText, hasText } = extractText(parseNote(bytes));
+      if (!hasText) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `This note has ${pages.length} page(s) but no recognized text — handwriting ` +
+                "recognition hasn't been run on the device for it. Use supernote_render_note to get " +
+                "the pages as images instead.",
+            },
+          ],
+        };
+      }
+      return { content: [{ type: "text", text: combinedText }] };
     } catch (err) {
       return {
         isError: true,

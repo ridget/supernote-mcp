@@ -96,6 +96,7 @@ LAN scan) and return a clear, actionable message on failure rather than hanging.
 |------|-------|-------|---------|
 | `supernote_snapshot` | Screen Mirroring (8080) | `ip?` | the live screen as `image/png` |
 | `supernote_list_files` | Browse & Access (8089) | `ip?`, `path?` | a listing — name, folder?, size, date, and a `path` to pass on |
+| `supernote_read_note` | Browse & Access (8089) | `ip?`, `path` | a note's recognized handwriting/text per page (or a note that recognition hasn't run) |
 
 Failures point at the usual causes — wrong IP, the relevant feature turned off, or the host/device
 not sharing a VPN-free Wi-Fi network — and time out fast (10s) rather than hanging.
