@@ -44,6 +44,8 @@ export interface ResolveOptions {
   port: number;
   /** How discovery recognises the device on this port. */
   probe: Probe;
+  /** LAN scanner used for the discovery fallback; defaults to {@link discoverSupernote}. Injectable for tests. */
+  scan?: typeof discoverSupernote;
   /** Allow a LAN scan when the configured address is unreachable/absent. Defaults to SUPERNOTE_DISCOVER. */
   discover?: boolean;
   /**
@@ -114,7 +116,7 @@ export async function withDeviceAddress<T>(
     throw new Error(messages.noConfigDiscoverOff());
   }
 
-  const found = await discoverSupernote({ port, probe: opts.probe });
+  const found = await (opts.scan ?? discoverSupernote)({ port, probe: opts.probe });
   if (!found) {
     throw new Error(messages.scanFoundNothing(configured ? withPort(configured, port) : undefined));
   }

@@ -1,22 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import * as realDiscover from "../src/discover.js";
-import type { DiscoverOptions } from "../src/discover.js";
 import * as realSupernote from "supernote-typescript";
+import type { CaptureOptions } from "../src/capture.js";
 
-// Stand-ins the mocked modules delegate to, swapped per test.
+// Per-test stand-ins. The scanner is *injected* into captureFrame (see `capture` below)
+// rather than mocked at the module level — bun's mock.module is process-global, so a
+// partial discover.js mock would leak a stub into discover.test.ts and hang/fail it
+// depending on file load order.
 let fetchMirrorFrameImpl: (ip: string) => Promise<{ toBase64: () => Promise<string> }>;
+let discoverImpl: () => Promise<string | null>;
 const fetchedHosts: string[] = [];
 
-// bun's mock.module is process-global and persists across files, so these mocks
-// also bind in every other test file that imports the same module. Two defences:
-//  1. Spread the real module so a partial mock never strips the other exports
-//     (SupernoteX, toImage, isMirrorHost, hostsForInterface, …).
-//  2. Route discoverSupernote through a mutable `discoverImpl` that *defaults to the
-//     real implementation* and is restored after every capture test — so discover.test.ts
-//     exercises the genuine scanner regardless of test-file load order.
-const realDiscoverSupernote = (opts?: DiscoverOptions) => realDiscover.discoverSupernote(opts);
-let discoverImpl: (opts?: DiscoverOptions) => Promise<string | null> = realDiscoverSupernote;
-
+// fetchMirrorFrame has no injection seam, so it's mocked at the module level. Spread the
+// real module so this partial mock doesn't strip SupernoteX/toImage for note.test.ts.
 mock.module("supernote-typescript", () => ({
   ...realSupernote,
   fetchMirrorFrame: (ip: string) => {
@@ -24,13 +19,13 @@ mock.module("supernote-typescript", () => ({
     return fetchMirrorFrameImpl(ip);
   },
 }));
-mock.module("../src/discover.js", () => ({
-  ...realDiscover,
-  discoverSupernote: (opts?: DiscoverOptions) => discoverImpl(opts),
-}));
 
-// Import after the mocks are registered so capture.ts binds to them.
+// Import after the mock is registered so capture.ts binds to it.
 const { captureFrame, configuredAddress, withPort } = await import("../src/capture.js");
+
+/** captureFrame with the LAN scanner injected, so tests drive discovery without a global mock. */
+const capture = (ip?: string, opts: CaptureOptions = {}): ReturnType<typeof captureFrame> =>
+  captureFrame(ip, { scan: () => discoverImpl(), ...opts });
 
 /** A fake image-js handle: `toBase64()` returns a PNG data URL, like the real one. */
 function fakeImage(): { toBase64: () => Promise<string> } {
@@ -102,9 +97,6 @@ describe("captureFrame", () => {
     else process.env[ENV_KEY] = originalIp;
     if (originalDiscover === undefined) delete process.env[DISCOVER_KEY];
     else process.env[DISCOVER_KEY] = originalDiscover;
-    // Hand discoverSupernote back to the real implementation so the global module
-    // mock doesn't leak a capture-test stub into other files (e.g. discover.test.ts).
-    discoverImpl = realDiscoverSupernote;
   });
 
   it("fast path: captures from the configured address and never scans", async () => {
@@ -114,7 +106,7 @@ describe("captureFrame", () => {
       return null;
     };
 
-    const frame = await captureFrame("192.168.1.5");
+    const frame = await capture("192.168.1.5");
 
     expect(frame.mimeType).toBe("image/png");
     expect(frame.base64).toBe("AAAA");
@@ -131,7 +123,7 @@ describe("captureFrame", () => {
     };
     discoverImpl = async () => "192.168.1.42";
 
-    const frame = await captureFrame("192.168.1.5");
+    const frame = await capture("192.168.1.5");
 
     expect(frame.base64).toBe("AAAA");
     expect(fetchedHosts).toEqual(["192.168.1.5:8080", "192.168.1.42:8080"]);
@@ -149,7 +141,7 @@ describe("captureFrame", () => {
     };
 
     // Discovery is enabled (default), yet an operational failure must not trigger a scan.
-    await expect(captureFrame("192.168.1.5")).rejects.toThrow(/Invalid response/);
+    await expect(capture("192.168.1.5")).rejects.toThrow(/Invalid response/);
     expect(discoverCalled).toBe(false);
     expect(fetchedHosts).toEqual(["192.168.1.5:8080"]);
   });
@@ -157,7 +149,7 @@ describe("captureFrame", () => {
   it("scans when no address is configured and discovery is enabled", async () => {
     discoverImpl = async () => "192.168.1.42";
 
-    const frame = await captureFrame();
+    const frame = await capture();
 
     expect(frame.base64).toBe("AAAA");
     expect(fetchedHosts).toEqual(["192.168.1.42:8080"]);
@@ -168,13 +160,13 @@ describe("captureFrame", () => {
       throw new TypeError("fetch failed");
     };
 
-    await expect(captureFrame("192.168.1.5", { discover: false })).rejects.toThrow(
+    await expect(capture("192.168.1.5", { discover: false })).rejects.toThrow(
       /Failed to capture a frame from the Supernote at 192\.168\.1\.5:8080.*fetch failed/s,
     );
   });
 
   it("errors clearly when no address is set and discovery is off", async () => {
-    await expect(captureFrame(undefined, { discover: false })).rejects.toThrow(
+    await expect(capture(undefined, { discover: false })).rejects.toThrow(
       /No Supernote IP provided and network discovery is disabled/,
     );
   });
@@ -182,7 +174,7 @@ describe("captureFrame", () => {
   it("reports a scan-found-nothing error when nothing is configured", async () => {
     discoverImpl = async () => null;
 
-    await expect(captureFrame()).rejects.toThrow(
+    await expect(capture()).rejects.toThrow(
       /No SUPERNOTE_IP was set, and a scan of the local network.*found no device/s,
     );
   });
@@ -193,7 +185,7 @@ describe("captureFrame", () => {
     };
     discoverImpl = async () => null;
 
-    await expect(captureFrame("192.168.1.5")).rejects.toThrow(
+    await expect(capture("192.168.1.5")).rejects.toThrow(
       /Could not reach the Supernote at 192\.168\.1\.5:8080, and a scan.*found no device/s,
     );
   });
@@ -206,7 +198,7 @@ describe("captureFrame", () => {
       return "192.168.1.42";
     };
 
-    await expect(captureFrame(undefined)).rejects.toThrow(/discovery is disabled/);
+    await expect(capture(undefined)).rejects.toThrow(/discovery is disabled/);
     expect(discoverCalled).toBe(false);
   });
 
@@ -214,7 +206,7 @@ describe("captureFrame", () => {
     fetchMirrorFrameImpl = () => new Promise(() => {}); // never resolves
 
     await expect(
-      captureFrame("192.168.1.5", { discover: false, timeoutMs: 10 }),
+      capture("192.168.1.5", { discover: false, timeoutMs: 10 }),
     ).rejects.toThrow(/Timed out after 10ms/);
   });
 });

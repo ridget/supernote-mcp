@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { fetchMirrorFrame } from "supernote-typescript";
-import { isMirrorHost } from "./discover.js";
+import { discoverSupernote, isMirrorHost } from "./discover.js";
 import { configuredAddress, discoveryEnabled, withDeviceAddress, withPort } from "./resolve.js";
 
 // Re-exported for callers/tests that import these from the capture module.
@@ -26,6 +26,8 @@ export interface CaptureOptions {
   timeoutMs?: number;
   /** Allow a LAN scan when the configured address is unreachable/absent. Defaults to SUPERNOTE_DISCOVER. */
   discover?: boolean;
+  /** LAN scanner for the discovery fallback; defaults to {@link discoverSupernote}. Injectable for tests. */
+  scan?: typeof discoverSupernote;
 }
 
 /**
@@ -75,6 +77,7 @@ export async function captureFrame(
       port,
       probe: isMirrorHost,
       discover: opts.discover,
+      scan: opts.scan,
       messages: {
         unreachableConfigured: (host, cause) =>
           `Failed to capture a frame from the Supernote at ${host}: ${cause}. ` +
