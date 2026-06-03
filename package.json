@@ -1,6 +1,6 @@
 {
   "name": "supernote-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "mcpName": "io.github.ridget/supernote-mcp",
   "description": "Unofficial MCP server for the Ratta Supernote e-ink tablet: capture the screen, read/render saved notes, and upload files over the LAN.",
   "license": "MIT",
