@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -23,6 +23,7 @@ const server = new McpServer(
       "- Read a saved note's words: supernote_read_note — recognized handwriting as text. Cheap and accurate; prefer it when the user wants the content.",
       "- See a saved note's pages (sketches/diagrams, or when read_note reports no recognized text): supernote_render_note.",
       "- Put a file onto the device: supernote_upload_file — the only tool that writes to the tablet.",
+      "- Get a file off the device: supernote_download_file — saves any file (PDF, exported note, etc.) to the local filesystem.",
       "",
       "Saved-note flow: supernote_list_files → take the entry's `path` → supernote_read_note (text) or supernote_render_note (images). supernote_snapshot is the current screen, not a saved file.",
       "Setup: the device and this host must share Wi-Fi (no VPN). Set SUPERNOTE_IP or let discovery find it. Screen Mirroring (for snapshot) and Browse & Access (for the file/note tools) are separate features the user toggles on the device; a tool fails clearly if its feature is off.",
@@ -247,6 +248,58 @@ server.registerTool(
         content.push({ type: "image", data: r.base64, mimeType: r.mimeType });
       }
       return { content };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [
+          { type: "text", text: err instanceof Error ? err.message : String(err) },
+        ],
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "supernote_download_file",
+  {
+    title: "Download a file from the Supernote",
+    description:
+      "Download a file from the user's Supernote e-ink tablet to the local filesystem over its " +
+      "Browse & Access Wi-Fi file server. Use this to retrieve annotated PDFs, exported notes, or any " +
+      "file stored on the device. Call supernote_list_files first to get the file's `path`. Requires " +
+      "Browse & Access enabled, same Wi-Fi, no VPN/proxy.",
+    inputSchema: {
+      ip: ipSchema,
+      path: z
+        .string()
+        .describe("The file's `path` from supernote_list_files, e.g. /Document/vectors-workbook.pdf."),
+      out: z
+        .string()
+        .optional()
+        .describe(
+          "Local filesystem path to save the file to. Defaults to a temp directory with the " +
+            "original filename preserved.",
+        ),
+    },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ ip, path, out }) => {
+    try {
+      const bytes = await downloadFile(ip, path);
+      const name = basename(path);
+      const dest = out ?? join(process.env.TMPDIR ?? "/tmp", name);
+      writeFileSync(dest, bytes);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Downloaded "${name}" (${bytes.length} bytes) to ${dest}.`,
+          },
+        ],
+      };
     } catch (err) {
       return {
         isError: true,

@@ -6,6 +6,7 @@ e-ink tablet. It lets an AI agent **see and work with your Supernote over the lo
 - **Grab the live screen** while you sketch or handwrite — *"what did I just draw?"*
 - **Browse and read your saved notebooks** — recognized handwriting as **text**, or pages as **images**.
 - **Upload files** to the device for you to read or annotate.
+- **Download files** from the device — retrieve annotated PDFs, exported notes, or any stored file.
 
 The idea is collaborative prompting: handwrite on the tablet during a planning session and pull it
 straight into the conversation, or have the agent read and reason over notes you saved earlier.
@@ -101,6 +102,7 @@ LAN scan) and return a clear, actionable message on failure rather than hanging.
 | `supernote_list_files` | Browse & Access (8089) | `ip?`, `path?` | a listing — name, folder?, size, date, and a `path` to pass on |
 | `supernote_read_note` | Browse & Access (8089) | `ip?`, `path` | a note's recognized handwriting/text per page (or a note that recognition hasn't run) |
 | `supernote_render_note` | Browse & Access (8089) | `ip?`, `path`, `pages?` | note pages as `image/png` (all pages, capped at 20, or the `pages` you pick) |
+| `supernote_download_file` | Browse & Access (8089) | `ip?`, `path`, `out?` | downloads a file from the device to the local filesystem |
 | `supernote_upload_file` | Browse & Access (8089) | `ip?`, `path`, `directory?`, `filename?` | uploads a **local** file to the device (the only tool that **writes** to it) |
 
 Failures point at the usual causes — wrong IP, the relevant feature turned off, or the host/device
@@ -108,6 +110,8 @@ not sharing a VPN-free Wi-Fi network — and time out fast (10s) rather than han
 
 All tools except `supernote_upload_file` are read-only. `supernote_upload_file` **writes** a file to
 the device (it reads a local file the server can access and POSTs it over Browse & Access).
+`supernote_download_file` reads a file **from** the device and saves it locally — use it to retrieve
+annotated PDFs, exported notes, or any file stored on the tablet.
 
 ### Choosing the right tool
 
@@ -121,10 +125,14 @@ on its own. The map:
 | To read a note's words | "read / summarise my meeting notes" | `supernote_read_note` |
 | To see a note's pages | "show me that sketch", "look at page 2" | `supernote_render_note` |
 | To put a file on the tablet | "send this PDF to my Supernote" | `supernote_upload_file` |
+| To get a file off the tablet | "download my annotated PDF" | `supernote_download_file` |
 
 **Saved-note flow:** `supernote_list_files` → take the entry's `path` → `supernote_read_note` (text,
 cheap — prefer for words) or `supernote_render_note` (images, for drawings or notes without
 recognized text). `supernote_snapshot` is separate — it's the *current screen*, not a saved file.
+
+**Download flow:** `supernote_list_files` → find the file → `supernote_download_file` with the
+entry's `path` → file is saved locally for processing (e.g. rendering an annotated PDF's pages).
 
 ## Local development
 
